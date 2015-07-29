@@ -1,6 +1,7 @@
 
 #include "sprout/string.hpp"
 #include "worm/detail/sfinae.hpp"
+#include "worm/detail/meta_utils.hpp"
 #include "stmp/stmp.hpp"
 
 #include <iostream>
@@ -12,119 +13,105 @@
 #define CAT_(x,y) CAT__(x,y)
 #define CAT(x,y) CAT_(x, y)
 
+constexpr std::size_t parse_type_name_(const char* name)
+{
+    return *name == '=' ? 2 : parse_type_name_(name + 1) + 1;
+}
+
 template<typename T>
-constexpr const char concept_message[] = "no message";
-
-template<typename Lhs, typename Rhs, std::size_t... Is, std::size_t... Js>
-constexpr std::array<char, sizeof...(Is) + sizeof...(Js)>
-str_cat(const Lhs& lhs, const Rhs& rhs,
-        std::index_sequence<Is...>, std::index_sequence<Js...>)
+constexpr const char* type_name()
 {
-    return {{ lhs[Is]..., rhs[Js]... }};
+    return __PRETTY_FUNCTION__ + parse_type_name_(__PRETTY_FUNCTION__);
 }
 
-template<std::size_t Lhs, std::size_t Rhs>
-constexpr auto str_cat(const std::array<char,Lhs>& lhs, const std::array<char, Rhs>& rhs)
-{
-    return str_cat(lhs, rhs, std::make_index_sequence<Lhs-1>{}, std::make_index_sequence<Rhs>{});
-}
 
-template<std::size_t Lhs, std::size_t Rhs>
-constexpr auto str_cat(const std::array<char,Lhs>& lhs, const char(&rhs)[Rhs])
-{
-    return str_cat(lhs, rhs, std::make_index_sequence<Lhs-1>{}, std::make_index_sequence<Rhs>{});
-}
+#define ASSERT_CONSTEXPR_STRING(str) static_assert(str[0] == str[0], "Non-constexpr string!")
 
-template<std::size_t Lhs, std::size_t Rhs>
-constexpr auto str_cat(const char(&lhs)[Lhs], const std::array<char, Rhs>& rhs)
-{
-    return str_cat(lhs, rhs, std::make_index_sequence<Lhs-1>{}, std::make_index_sequence<Rhs>{});
-}
-
-template<std::size_t Lhs, std::size_t Rhs>
-constexpr auto str_cat(const char(&lhs)[Lhs], const char(&rhs)[Rhs])
-{
-    return str_cat(lhs, rhs, std::make_index_sequence<Lhs-1>{}, std::make_index_sequence<Rhs>{});
-}
-
-template<std::size_t Lhs, std::size_t... Is>
-constexpr std::array<char, sizeof...(Is)>
-str_cpy(const char(&lhs)[Lhs], std::index_sequence<Is...>)
-{
-    return {{ lhs[Is]... }};
-}
-
-template<std::size_t Lhs>
-constexpr auto str_cpy(const std::array<char,Lhs>& lhs)
-{
-    return str_cpy(lhs, std::make_index_sequence<Lhs>{});
-}
-
-template<std::size_t Lhs>
-constexpr auto str_cpy(const char(&lhs)[Lhs])
-{
-    return str_cpy(lhs, std::make_index_sequence<Lhs>{});
-}
-
-template<typename Lhs, std::size_t... Is>
-const char*
-to_str(const Lhs& lhs, std::index_sequence<Is...>)
-{
-    static char str[] = { lhs[Is]... };
-    return str;
-}
-
-template<std::size_t Lhs>
-constexpr const char* to_str(const std::array<char,Lhs>& lhs)
-{
-    return to_str(lhs, std::make_index_sequence<Lhs>{});
-}
-
-#define ASSERT_CONSEXPR_STRING(str) static_assert(str[0] == str[0], "Non-constexpr string!")
-
-
-#define REQUIRES_EXPR__(expr,id) struct CAT(check_,id) \
+#define REQUIRES_EXPR___(expr, message_, id, ...) struct CAT(check_,id) \
 { \
-    template<typename T_, typename = void> \
+    template<typename Ts_ = worm::detail::list<Ts...>, typename Head_ = Head, typename Tail_ = worm::detail::list<Tail...>, typename First_ = First, \
+             typename Second_ = Second, typename T_ = T, typename U_ = U, typename = void> \
     struct valid : std::false_type \
     { \
-        static constexpr auto message = sprout::to_string( "(requires) " STRINGFY(expr) " [FAILED]\n"); \
-        static constexpr const char* ptr_ = message.data(); \
+        static constexpr auto message = " " + sprout::to_string(message_ " [FAILED]\n"); \
     }; \
      \
-    template<typename T_> \
-    struct valid<T_,worm::detail::void_t<decltype(expr)>> : std::true_type \
+    template<typename... Ts_, typename Head_, typename... Tail_, typename First_, \
+             typename Second_, typename T_, typename U_> \
+    struct valid<worm::detail::list<Ts_...>, \
+                 Head_, worm::detail::list<Tail_...>, \
+                 First_, Second_, T_, U_, \
+                 __VA_ARGS__> : std::true_type \
     { \
-        static constexpr auto message = sprout::to_string( "(requires) " STRINGFY(expr) " [SUCCEED]\n"); \
-        static constexpr const char* ptr_ = message.data(); \
+        static constexpr auto message = " " + sprout::to_string(message_ " [SUCCEED]\n"); \
     }; \
-    static constexpr bool value = (checks::template push<CAT(check_,id)>(),valid<T>::value); \
+    static constexpr bool value = (checks::template push<CAT(check_,id)>(),valid<>::value); \
      \
-    static constexpr auto message = valid<T>::message; \
+    static constexpr auto message = valid<>::message; \
     constexpr CAT(check_,id)() = default; \
 }; \
 static constexpr CAT(check_,id) CAT(CAT(check_,id), _c) = CAT(check_,id){};
 
-#define REQUIRES_EXPR_(expr, id) REQUIRES_EXPR__(expr, id)
-#define UNARY_REQUIRES_EXPR(expr) REQUIRES_EXPR_(expr, __COUNTER__)
+#define REQUIRES_EXPR__(expr, message, id, ...) REQUIRES_EXPR___(expr, message, id, __VA_ARGS__)
+#define REQUIRES_EXPR_(expr, message, ...) REQUIRES_EXPR__(expr, message, __COUNTER__, __VA_ARGS__)
+
+
+#define REQUIRES_EXPR_EXPECTED(expr, expected) \
+    REQUIRES_EXPR_(expr, "\"" STRINGFY(expr) "\" of type \"" STRINGFY(expected) "\"", \
+                   worm::detail::enable_if_t<std::is_same<decltype(expr), expected>::value>)
+
+#define REQUIRES_EXPR_CONVERTIBLE(expr, expected) \
+    REQUIRES_EXPR_(expr, "\"" STRINGFY(expr) "\" convertible to \"" STRINGFY(expected) "\"", \
+                   worm::detail::enable_if_t<std::is_convertible<decltype(expr), expected>::value>)
+
+
+#define REQUIRES_EXPR(expr) REQUIRES_EXPR_(expr, "\"" STRINGFY(expr) "\"", worm::detail::void_t<decltype(expr)>)
+
+#define REQUIRES_TRAIT_EXPECTED(trait, expected) \
+    REQUIRES_EXPR_(trait, "\"" STRINGFY(trait) "\" giving \"" STRINGFY(expected) "\"", \
+                   worm::detail::enable_if_t<trait{} == expected>)
+
+#define REQUIRES_TRAIT(...) REQUIRES_TRAIT_EXPECTED((__VA_ARGS__), true)
 
 template<typename meta_list>
 using type_list = typename meta_list::template value<>;
 
-template<typename... Refinements>
-struct Refines
+template<typename T, typename Refinement>
+struct refinement
 {
-    using refines = atch::type_list<Refinements...>;
+    using from = T;
+    using concept = Refinement;
 };
 
-#define BEGIN_CONCEPT(name,...) struct name : Refines<__VA_ARGS__> { using checks = atch::meta_list<name>; \
-                                    static constexpr auto concept_name = sprout::to_string(STRINGFY(name));
 
-#define END_CONCEPT(name) static constexpr decltype(Message<name>()) message = Message<name>(); \
-                          static constexpr bool value = Value<name>(); \
-                          ASSERT_CONSEXPR_STRING(name::message);}; \
-                          template<typename Ts> \
-                          constexpr decltype(Message<name<Ts>>()) name<Ts>::message;
+#define BEGIN_CONCEPT(name,...) namespace { template<typename... Args> \
+                                struct name { using checks = atch::meta_list<name>; \
+                                using concept_args = worm::detail::list<Args...>; \
+                                using Self = name; \
+                                static constexpr auto concept_name = sprout::to_string(STRINGFY(name)); \
+                                static constexpr auto refinements_str = sprout::to_string(STRINGFY((__VA_ARGS__)));\
+\
+                                template<typename Ts, typename Head = typename Ts::head, typename Tail = typename Ts::tail,\
+                                         typename First = Head, typename Second = typename Ts::second, typename T = First, \
+                                         typename U = Second> \
+                                struct checks_holder_; \
+\
+                                template<typename... Ts, typename Head, typename... Tail, typename First, typename Second, \
+                                         typename T, typename U> \
+                                struct checks_holder_<worm::detail::list<Ts...>, \
+                                                     Head, worm::detail::list<Tail...>, \
+                                                     First, Second, T, U> \
+                                { constexpr checks_holder_(int i) : i{i} {} int i; using refines = atch::type_list<__VA_ARGS__>;
+
+#define END_CONCEPT(name) }; using checks_holder = checks_holder_<concept_args, typename concept_args::head, typename concept_args::tail, \
+                                                                  typename concept_args::first, typename concept_args::second>; \
+                             static constexpr decltype(Message<name>()) message = Message<name>(); \
+                             static constexpr checks_holder checks_holder_instance_ = checks_holder{42}; \
+                             static constexpr bool value = Value<name>(); \
+                             ASSERT_CONSTEXPR_STRING(name::message);}; } \
+\
+                          template<typename... Ts> \
+                          constexpr decltype(Message<name<Ts...>>()) name<Ts...>::message;
 
 
 template<typename Is>
@@ -164,57 +151,82 @@ struct fold<atch::type_list<Head>, Indent>
 template<std::size_t Indent>
 struct fold<atch::type_list<>,Indent>
 {
-    static constexpr auto message = sprout::to_string("{}\n");
+    static constexpr auto message = sprout::to_string("");
     static constexpr bool value = true;
 };
 
 template<typename Concept>
-constexpr auto Message()
+constexpr auto Message(typename std::enable_if<!Concept::checks_holder::refines::empty>::type* = nullptr)
 {
-    return "{" + Concept::concept_name +
-           "\n(refines)" + fold<typename Concept::refines,0>::message +
-           fold<type_list<typename Concept::checks>,0>::message + "}";
+    return Concept::concept_name + " requires:\n" +
+           fold<type_list<typename Concept::checks>,0>::message +
+           "While refining " + Concept::refinements_str + " with " + Concept::concept_name + ":\n" +
+           fold<typename Concept::checks_holder::refines,0>::message;
+}
+
+template<typename Concept>
+constexpr auto Message(typename std::enable_if<Concept::checks_holder::refines::empty>::type* = nullptr)
+{
+    return Concept::concept_name + " requires:\n" + fold<type_list<typename Concept::checks>,0>::message;
 }
 
 template<typename Concept>
 constexpr bool Value()
 {
-    return fold<typename Concept::refines,4>::value && fold<type_list<typename Concept::checks>,0>::value;
+    return fold<typename Concept::checks_holder::refines,0>::value && fold<type_list<typename Concept::checks>,0>::value;
 }
 
-
-
+template<typename T>
+constexpr typename std::decay<T>::type lvalue;
 
 template<typename T>
-BEGIN_CONCEPT(Addable)
-    UNARY_REQUIRES_EXPR(std::declval<T_>() + std::declval<T_>())
-END_CONCEPT(Addable)
+constexpr typename std::decay<T>::type&& rvalue = lvalue<T>;
+
+#define CONCEPT_FROM_TRAIT(Concept, Trait) BEGIN_CONCEPT(Concept)  REQUIRES_TRAIT(Trait<Ts...>) END_CONCEPT(Concept)
+
+CONCEPT_FROM_TRAIT(DefaultConstructible, std::is_default_constructible)
+CONCEPT_FROM_TRAIT(CopyConstructible, std::is_copy_constructible)
+CONCEPT_FROM_TRAIT(Destructible, std::is_destructible)
+CONCEPT_FROM_TRAIT(CopyAssignable, std::is_copy_assignable)
+
+BEGIN_CONCEPT(Semiregular, DefaultConstructible<T>, CopyConstructible<T>, Destructible<T>, CopyAssignable<T>)
+    REQUIRES_EXPR_EXPECTED(&lvalue<T_>, const T_*)
+END_CONCEPT(Semiregular)
+
+BEGIN_CONCEPT(EqualityComparable)
+    REQUIRES_EXPR_CONVERTIBLE(std::declval<T_>() == std::declval<T_>(), bool)
+    REQUIRES_EXPR_CONVERTIBLE(std::declval<T_>() == std::declval<T_>(), bool)
+END_CONCEPT(EqualityComparable)
+
+BEGIN_CONCEPT(Regular, Semiregular<T>, EqualityComparable<T>)
+END_CONCEPT(Regular)
+
+BEGIN_CONCEPT(Allocatable)
+    REQUIRES_EXPR_EXPECTED(new T_, T_*)
+    REQUIRES_EXPR(delete std::declval<T_*>())
+    REQUIRES_EXPR_EXPECTED(new T_[666], T_*)
+    REQUIRES_EXPR(delete [] new T_[666])
+END_CONCEPT(Allocatable)
+
+
+BEGIN_CONCEPT(AllIntegral, AllIntegral<Tail>...)
+    REQUIRES_TRAIT(std::is_integral<Head_>)
+END_CONCEPT(AllIntegral)
 
 template<typename T>
-BEGIN_CONCEPT(Comparable)
-    UNARY_REQUIRES_EXPR(std::declval<T_>() == std::declval<T_>())
-    UNARY_REQUIRES_EXPR(std::declval<T_>() != std::declval<T_>())
-END_CONCEPT(Comparable)
+using uncvref_t =
+typename std::remove_cv<typename std::remove_reference<T>::type>::type;
 
-template<typename T>
-BEGIN_CONCEPT(Arithmetic, Addable<T>, Comparable<T>)
-    UNARY_REQUIRES_EXPR(std::declval<T_>() - std::declval<T_>())
-END_CONCEPT(Arithmetic)
+BEGIN_CONCEPT(Iterable)
 
-template<typename T>
-BEGIN_CONCEPT(Integral, Arithmetic<T>)
-    UNARY_REQUIRES_EXPR(std::declval<T_>() >> std::declval<T_>())
-    UNARY_REQUIRES_EXPR(std::declval<T_>() << std::declval<T_>())
-    UNARY_REQUIRES_EXPR(std::declval<T_>() % std::declval<T_>())
-END_CONCEPT(Integral)
-
-static_assert(Integral<int>::value,"");
-static_assert(!Integral<float>::value,"");
-
+END_CONCEPT(Iterable)
 
 int main()
 {
-    std::cout << Integral<float>::message.c_str() << std::endl;
+    using concept = Regular<int>;
+
+    std::cout << concept::message << std::endl;
+    std::cout << concept::value << std::endl;
 }
 
 

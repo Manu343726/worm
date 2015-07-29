@@ -27,6 +27,7 @@ namespace atch {
         // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
         static constexpr size_type size () { return sizeof... (Ts); }
+        static constexpr bool empty = size() == 0;
 
         // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
